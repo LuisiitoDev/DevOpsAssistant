@@ -1,0 +1,430 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using System.Text.RegularExpressions
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Chat Assistant</PageTitle>
+
+<div class="chat-container">
+
+    <div class="chat-header">
+        <div class="bot-icon">🤖</div>
+        <h1 class="chat-title">DevOps Assistant</h1>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+        @if (messages.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon">💬</div>
+                <p>Start a conversation with your DevOps Assistant</p>
+            </div>
+        }
+        else
+        {
+            @foreach (var message in messages)
+            {
+                <div class="message @(message.IsUser ? "user" : "assistant")">
+                    <div class="message-bubble">
+                        <div class="message-content">
+                            @((MarkupString)FormatMessageContent(message.Content))
+                        </div>
+                        <div class="message-time">@message.Timestamp.ToString("HH:mm")</div>
+                    </div>
+                </div>
+            }
+        }
+
+        @if (isTyping)
+        {
+            <div class="message assistant">
+                <div class="typing-indicator">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="chat-input">
+        <EditForm Model="@messageInput" OnValidSubmit="@SendMessage">
+            <DataAnnotationsValidator />
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <InputTextArea @bind-Value="messageInput.Content"
+                                   class="message-textarea"
+                                   placeholder="Type your message here..."
+                                   rows="1"
+                                   disabled="@isTyping" />
+                    <ValidationMessage For="@(() => messageInput.Content)" />
+                </div>
+                <button type="submit" class="send-button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22,2 15,22 11,13 2,9"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private string FormatMessageContent(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return string.Empty;
+
+        // Escape HTML first
+        content = System.Net.WebUtility.HtmlEncode(content);
+
+        // Handle code blocks (```language...```)
+        content = Regex.Replace(content, @"```(\w+)?\n?(.*?)\n?```",
+            match =>
+            {
+                var language = match.Groups[1].Value;
+                var code = match.Groups[2].Value;
+                var languageClass = !string.IsNullOrEmpty(language) ? $" language-{language}" : "";
+                return $"<pre class=\"code-block\"><code class=\"{languageClass}\">{code}</code></pre>";
+            }, RegexOptions.Singleline);
+
+        // Handle inline code (`code`)
+        content = Regex.Replace(content, @"`([^`]+)`", "<code class=\"inline-code\">$1</code>");
+
+        // Handle bold (**text**)
+        content = Regex.Replace(content, @"\*\*([^*]+)\*\*", "<strong>$1</strong>");
+
+        // Handle italic (*text*)
+        content = Regex.Replace(content, @"\*([^*]+)\*", "<em>$1</em>");
+
+        // Handle bullet points (- item or * item)
+        content = Regex.Replace(content, @"^[\-\*]\s+(.+)$", "<li>$1</li>", RegexOptions.Multiline);
+
+        // Wrap consecutive list items in ul tags
+        content = Regex.Replace(content, @"(<li>.*?</li>(?:\s*<li>.*?</li>)*)", "<ul>$1</ul>", RegexOptions.Singleline);
+
+        // Handle numbered lists (1. item)
+        content = Regex.Replace(content, @"^\d+\.\s+(.+)$", "<li>$1</li>", RegexOptions.Multiline);
+
+        // Wrap consecutive numbered list items in ol tags
+        content = Regex.Replace(content, @"(<li>.*?</li>(?:\s*<li>.*?</li>)*)",
+            match =>
+            {
+                if (content.IndexOf(match.Value) > 0 && content.Substring(0, content.IndexOf(match.Value)).Contains("<ul>"))
+                    return match.Value; // Already wrapped as ul
+                return $"<ol>{match.Value}</ol>";
+            }, RegexOptions.Singleline);
+
+        // Handle line breaks
+        content = content.Replace("\n", "<br>");
+
+        // Handle links (basic URL detection)
+        content = Regex.Replace(content, @"https?://[^\s<]+", "<a href=\"$0\" target=\"_blank\" rel=\"noopener noreferrer\">$0</a>");
+
+        return content;
+    }
+}
+
+<style>
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        height: 80vh;
+        background: white;
+    }
+
+    .chat-header {
+        padding: 20px 24px;
+        border-bottom: 1px solid #f0f0f0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+    }
+
+    .bot-icon {
+        width: 32px;
+        height: 32px;
+        background: #f8f9ff;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        color: #4f46e5;
+    }
+
+    .chat-title {
+        font-size: 16px;
+        font-weight: 500;
+        color: #1f2937;
+    }
+
+    .chat-messages {
+        flex: 1;
+        padding: 24px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-height: 0;
+    }
+
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #9ca3af;
+        text-align: center;
+    }
+
+    .empty-icon {
+        width: 48px;
+        height: 48px;
+        background: #f3f4f6;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 16px;
+        font-size: 20px;
+    }
+
+    .message {
+        display: flex;
+        margin-bottom: 16px;
+    }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+    .message-bubble {
+        max-width: 70%;
+        padding: 12px 16px;
+        border-radius: 18px;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    .message.user .message-bubble {
+        background: #4f46e5;
+        color: white;
+    }
+
+    .message.assistant .message-bubble {
+        background: #f9fafb;
+        color: #374151;
+        border: 1px solid #f0f0f0;
+    }
+
+    .message-content {
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+
+        .message-content strong {
+            font-weight: 600;
+        }
+
+        .message-content em {
+            font-style: italic;
+        }
+
+        .message-content ul, .message-content ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .message-content li {
+            margin: 4px 0;
+        }
+
+        .message-content .inline-code {
+            background: rgba(175, 184, 193, 0.2);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+    .message.user .message-content .inline-code {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    .message-content .code-block {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        padding: 12px;
+        margin: 8px 0;
+        overflow-x: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.4;
+    }
+
+    .message.user .message-content .code-block {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .message-content .code-block code {
+        background: none;
+        padding: 0;
+        border: none;
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
+    }
+
+    .message-content a {
+        color: #4f46e5;
+        text-decoration: underline;
+    }
+
+    .message.user .message-content a {
+        color: #e0e7ff;
+    }
+
+    .message-time {
+        font-size: 11px;
+        margin-top: 4px;
+        opacity: 0.7;
+    }
+
+    .typing-indicator {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 12px 16px;
+        background: #f9fafb;
+        border: 1px solid #f0f0f0;
+        border-radius: 18px;
+        max-width: 70px;
+    }
+
+    .typing-dot {
+        width: 6px;
+        height: 6px;
+        background: #9ca3af;
+        border-radius: 50%;
+        animation: typing 1.4s infinite ease-in-out;
+    }
+
+        .typing-dot:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+    @@keyframes typing {
+        0%, 80%, 100% {
+            transform: scale(0.8);
+            opacity: 0.5;
+        }
+
+        40% {
+            transform: scale(1);
+            opacity: 1;
+        }
+    }
+
+    .chat-input {
+        padding: 20px 24px;
+        border-top: 1px solid #f0f0f0;
+        background: white;
+        flex-shrink: 0;
+    }
+
+    .input-container {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+    }
+
+    .input-wrapper {
+        flex: 1;
+    }
+
+    textarea {
+        width: 100%;
+        min-height: 44px;
+        max-height: 120px;
+        padding: 12px 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 22px;
+        font-family: inherit;
+        font-size: 14px;
+        resize: none;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+
+        textarea:focus {
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        textarea:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+    .send-button {
+        width: 44px;
+        height: 44px;
+        background: #4f46e5;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.2s;
+        flex-shrink: 0;
+    }
+
+        .send-button:hover:not(:disabled) {
+            background: #4338ca;
+        }
+
+        .send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+    @@media (max-width: 768px) {
+        .chat-header {
+            padding: 16px 20px;
+        }
+
+        .chat-messages {
+            padding: 20px;
+        }
+
+        .chat-input {
+            padding: 16px 20px;
+        }
+
+        .message-bubble {
+            max-width: 85%;
+        }
+    }
+</style>
+
+<script>
+    window.scrollToBottom = (elementId) => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.scrollTop = element.scrollHeight;
+        }
+    };
+</script>
